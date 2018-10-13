@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import tensorflow as tf
+import cv2
 from pathlib import Path
 from imageio import imread
 from functools import partial
@@ -27,11 +28,21 @@ def load_flow(uri):
             return data
         return None
 
+def resize_flow(flow, resize_shape):
+    if flow.ndim != 3:
+        raise ValueError(f'Flow dimension should be 3, but found {flow.ndim} dimension')
+    h, w = flow.shape[:2]
+    th, tw = resize_shape # target size
+    scale = np.array([tw/w, th/h]).reshape((1, 1, 2))
+    flow = cv2.resize(flow, dsize = (tw, th))*scale
+    flow = np.float32(flow)
+    return flow
+
 
 class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 crop_type = 'random', crop_shape = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
         """ 
         Args:
@@ -39,6 +50,7 @@ class BaseDataset(metaclass = ABCMeta):
         - train_or_val str: flag indicates train or validation
         - crop_type str: crop type, 'random', 'center', or None
         - crop_shape tuple<int>: crop shape
+        - resize_shape tuple<int>: resize shape
         - shuffle bool: if shuffle or not
         - batch_size int: batch size
         - num_parallel_calls int: # of parallel calls
@@ -50,6 +62,7 @@ class BaseDataset(metaclass = ABCMeta):
 
         self.crop_type = crop_type
         self.crop_shape = crop_shape
+        self.resize_shape = resize_shape
 
         self.shuffle = shuffle
         self.batch_size = batch_size
@@ -113,6 +126,9 @@ class BaseDataset(metaclass = ABCMeta):
         if self.crop_shape is not None:
             image_0, image_1, flow = tf.py_func(self._crop_py, [image_0, image_1, flow],
                                                 [tf.uint8, tf.uint8, tf.float32])
+        if self.resize_shape is not None:
+            image_0, image_1, flow = tf.py_func(self._resize_py, [image_0, image_1, flow],
+                                                [tf.uint8, tf.uint8, tf.float32])
 
         images = tf.stack([image_0, image_1], axis = 0)
         images = tf.cast(images, tf.float32)
@@ -130,6 +146,13 @@ class BaseDataset(metaclass = ABCMeta):
         else:
             raise ValueError('invalid cropping argument has found')
         image_0, image_1, flow = map(cropper, [image_0, image_1, flow])
+        return image_0, image_1, flow
+
+    def _resize_py(self, image_0, image_1, flow):
+        """ Native python function for resizing """
+        image_0 = cv2.resize(image_0, dsize = tuple(self.resize_shape[::-1]))
+        image_1 = cv2.resize(image_1, dsize = tuple(self.resize_shape[::-1]))
+        flow = resize_flow(flow, self.resize_shape)
         return image_0, image_1, flow
             
     def _build(self):
@@ -151,9 +174,9 @@ class BaseDataset(metaclass = ABCMeta):
 class FlyingChairs(BaseDataset):
     """ FlyingChairs dataset pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 crop_type = 'random', crop_shape = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape,
+        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
                          shuffle, batch_size, num_parallel_calls)
 
     def has_no_txt(self):
@@ -165,9 +188,9 @@ class FlyingChairs(BaseDataset):
 
 class FlyingThings3D(BaseDataset):
     def __init__(self, dataset_dir, train_or_val,
-                 crop_type = 'random', crop_shape = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape,
+        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
                          shuffle, batch_size, num_parallel_calls)
 
     def has_no_txt(self):
@@ -178,10 +201,11 @@ class FlyingThings3D(BaseDataset):
 class Sintel(BaseDataset):
     """ MPI-Sintel-complete dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, mode = 'clean',
-                 crop_type = 'random', crop_shape = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
         self.mode = mode
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape,
+        super().__init__(dataset_dir, train_or_val,
+                         crop_type, crop_shape, resize_shape,
                          shuffle, batch_size, num_parallel_calls)
 
     def has_no_txt(self):
@@ -198,9 +222,11 @@ class Sintel(BaseDataset):
 
 class SintelClean(Sintel):
     """ MPI-Sintel-complete dataset (clean path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, crop_type, crop_shape,
+    def __init__(self, dataset_dir, train_or_val,
+                 crop_type, crop_shape, resize_shape,
                  shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'clean', crop_type, crop_shape,
+        super().__init__(dataset_dir, train_or_val, 'clean',
+                         crop_type, crop_shape, resize_shape,
                          shuffle, batch_size, num_parallel_calls)
 
     def has_txt(self):
@@ -216,9 +242,11 @@ class SintelClean(Sintel):
 
 class SintelFinal(Sintel):
     """ MPI-Sintel-complete dataset (final path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, crop_type, crop_shape,
+    def __init__(self, dataset_dir, train_or_val,
+                 crop_type, crop_shape, resize_shape,
                  shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'final', crop_type, crop_shape,
+        super().__init__(dataset_dir, train_or_val, 'final',
+                         crop_type, crop_shape, resize_shape,
                          shuffle, batch_size, num_parallel_calls)
 
     def has_txt(self):

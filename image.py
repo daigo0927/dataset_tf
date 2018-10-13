@@ -1,6 +1,8 @@
 import random
 import numpy as np
 import tensorflow as tf
+import cv2
+import warnings
 from pathlib import Path
 from imageio import imread
 from functools import partial
@@ -48,9 +50,12 @@ class BaseDataset(metaclass = ABCMeta):
         self.batch_size = batch_size
         self.num_parallel_calls = num_parallel_calls
 
+        self.get_classes()
         p = Path(dataset_dir) / (train_or_val+'_{self.strides}frames.txt')
         if p.exists(): self.has_txt()
         else: self.has_no_txt()
+
+        warnings.filterwarnings('ignore', category = UserWarning)
         self._build()
 
     def has_txt(self):
@@ -59,7 +64,7 @@ class BaseDataset(metaclass = ABCMeta):
         with open(p, 'r') as f:
             for i in f.readlines():
                 img_path, label = i.split(',')
-                label = int(label.strip())
+                label = label.strip()
                 self.samples.append(img_path, label)
 
     @abstractmethod
@@ -79,7 +84,7 @@ class BaseDataset(metaclass = ABCMeta):
 
         self.samples = train_samples if self.train_or_val == 'train' else val_samples
 
-    def parse(self, img_path, label):
+    def parse(self, file_and_label):
         """
         Tensorflow file parser 
         Args:
@@ -89,22 +94,32 @@ class BaseDataset(metaclass = ABCMeta):
         - tf.Tensor<tf.uint8> image_0, image_1: target 0,1-th image
         - tf.Tensor<tf.uint8> flow: target optical flow
         """
+        # image, label = tf.py_func(lambda f: self._read_py(f), [file_and_label],
+        #                           [tf.uint8, tf.int32])
+        img_path, label = file_and_label[0], file_and_label[1]
+        # pdb.set_trace()
         image = tf.py_func(lambda p: imread(p.decode()), [img_path], tf.uint8)
+        label = tf.string_to_number(label, tf.int32)
         return image, label
 
-    def _read_py(self, filenames):
-        """ Native python function for read image and flow data """
-        raise NotImplementedError('Native python function to read images is not implemented')
+    def _read_py(self, file_and_label):
+        """ Native python function for read image and label """
+        img_path, label = file_and_label
+        image = imread(img_path.decode())
+        label = int(label.decode())
+        return image, label
 
     def preprocess(self, image, label):
-        """ Function to preprocess raw images and optical flow """
-        # TODO: force gray-scale image to rgb image
-        
+        """ Function to preprocess raw image """
+        # Force all images to be RGB
+        image = tf.py_func(utils.to_rgb, [image], tf.uint8)
+
         if self.crop_shape is not None:
             image = tf.py_func(self._crop_py, [image], tf.uint8)
 
         if self.resize_shape is not None:
-            image = tf.image.resize_images(image, self.resize_shape)
+            image = tf.py_func(lambda x: cv2.resize(x, dsize = tuple(self.resize_shape[::-1])),
+                               [image], tf.uint8)
 
         if self.one_hot:
             label = tf.one_hot(label, self.num_classes)
@@ -117,21 +132,21 @@ class BaseDataset(metaclass = ABCMeta):
         else:
             return image
 
-    def _crop_py(self, image_0, image_t, image_1):
+    def _crop_py(self, image):
         """ Native python function for cropping """
-        image_size = image_0.shape[0:2]
+        image_size = image.shape[0:2]
         if self.crop_type == 'random':
             cropper = utils.RandomCropper(image_size, self.crop_shape)
         elif self.crop_type == 'center':
             cropper = utils.CenterCropper(image_size, self.crop_shape)
         else:
             raise ValueError('invalid cropping argument has found')
-        image_0, image_t, image_1 = map(cropper, [image_0, image_t, image_1])
-        return image_0, image_t, image_1
+        image = cropper(image)
+        return image
 
     @abstractmethod
     def get_classes(self):
-        pass # TODO
+        pass 
             
     def _build(self):
         self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
@@ -149,114 +164,48 @@ class BaseDataset(metaclass = ABCMeta):
         return self._dataset.make_one_shot_iterator()
 
 
-class DAVIS(BaseDataset):
-    """ DAVIS dataset pipeline """
-    def __init__(self, dataset_dir, train_or_val, resolution = '480p',
-                 strides = 3, stretchable = False,
-                 crop_type = 'random', crop_shape = None,
+class Food101(BaseDataset):
+    """ Food-101 dataset pipeline """
+    def __init__(self, dataset_dir, train_or_val,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
+                 use_label = True, one_hot = True,
                  shuffle = False, batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
-        - resolution str: either 480p or Full-Resolution for target resolution
-        - strides int: target temporal range of triplet images
-        - stretchable bool: enabling shift of start and end index of triplet images
         - crop_type str: crop type either of [random, center, None]
-        - crop_shape tuple<int>: crop shape of target images
-        - shuffle bool: if shuffle samples
+        - crop_shape tuple<int>: crop shape
+        - resize_shape tuple<int>: resize shape
+        - use_label bool: if use label or not
+        - one_hot bool: if encode label one-hot or not
+        - shuffle bool: if shuffle or not
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
-        if not resolution in ['480p', 'Full-Resolution']:
-            raise ValueError('Invalid argument for target resolution')
-        self.resolution = resolution
-        super().__init__(dataset_dir, train_or_val, strides, stretchable,
-                         crop_type, crop_shape, shuffle, batch_size, num_parallel_calls)
-
-    def has_txt(self):
-        p = Path(self.dataset_dir) / (self.train_or_val + f'_{self.strides}frames.txt')
-        res_other = 'Full-Resolution' if self.resolution == '480p' else '480p'
-        self.samples = []
-        with open(p, 'r') as f:
-            for i in f.readlines():
-                self.samples.append(i.replace(res_other, self.resolution).strip().split(','))
+        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
+                         use_label, one_hot, shuffle, batch_size, num_parallel_calls)
 
     def has_no_txt(self):
         p = Path(self.dataset_dir)
-        p_set = p / 'ImageSets/2017' / (self.train_or_val+'.txt')
-        p_img = p / 'JPEGImages' / self.resolution
-
+        p_set = p / 'meta' / (self.train_or_val+'.txt')
+        p_img = p / 'images'
         self.samples = []
+
         with open(p_set, 'r') as f:
             for i in f.readlines():
-                p_img_categ = p_img / i.strip()
-                collection = sorted(map(str, p_img_categ.glob('*.jpg')))
-                self.samples += [i for i in utils.window(collection, self.strides)]
+                i = i.strip()
+                class_ = i.split('/')[0]
+                sample = (str(p_img/(i+'.jpg')), str(self.classes.index(class_)))
+                self.samples.append(sample)
 
-        with open(p / (self.train_or_val+f'_{self.strides}frames.txt'), 'w') as f:
+        with open(p/(self.train_or_val+'.txt'), 'w') as f:
             f.writelines((','.join(i) + '\n' for i in self.samples))
-        
 
-class Sintel(BaseDataset):
-    """ MPI-Sintel-complete dataset pipeline """
-    def __init__(self, dataset_dir, train_or_val, mode = 'clean',
-                 strides = 3, stretchable = False,
-                 crop_type = 'random', crop_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
-        """ 
-        Args:
-        - dataset_dir str: target dataset directory
-        - train_or_val str: flag indicates train or validation
-        - mode str: either clean or final to specify data path
-        - strides int: target temporal range of triplet images
-        - stretchable bool: enabling shift of start and end index of triplet images
-        - crop_type str: crop type either of [random, center, None]
-        - crop_shape tuple<int>: crop shape of target images
-        - shuffle bool: if shuffle samples
-        - batch_size int: batch size
-        - num_parallel_calls int: number of parallel process
-        """
-        self.mode = mode
-        super().__init__(dataset_dir, train_or_val, strides, stretchable,
-                         crop_type, crop_shape, shuffle, batch_size, num_parallel_calls)
-
-    def has_no_txt(self):
+    def get_classes(self):
         p = Path(self.dataset_dir)
-        p_img = p / 'training' / self.mode
-        p_flow = p / 'training/flow'
-        
-        collections_of_scenes = sorted(map(str, p_img.glob('**/*.png')))
-        collections = [list(g) for k, g in groupby(collections_of_scenes, lambda x: x.split('/'[-2]))]
-        samples = [(*i, i[0].replace(self.mode, 'flow').replace('.png', '.flo'))\
-                    for collection in collections for i in utils.window(collection, 2)]
-        self.split(samples)
-
-
-class SintelClean(Sintel):
-    """ MPI-Sintel-complete dataset (clean path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, strides, stretchable,
-                 crop_type, crop_shape, shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'clean', strides, stretchable,
-                         crop_type, crop_shape, shuffle, batch_size, num_parallel_calls)
-
-    def has_txt(self):
-        p = Path(self.dataset_dir) / (self.train_or_val+f'_{self.strides}.txt')
-        self.samples = []
-        with open(p, 'r') as f:
-            for i in f.readlines():
-                self.samples.append(i.replace('final', 'clean').strip().split(','))
-                
-class SintelFinal(Sintel):
-    """ MPI-Sintel-complete dataset (final path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, strides, stretchable,
-                 crop_type, crop_shape, shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'final', strides, stretchable,
-                         crop_type, crop_shape, shuffle, batch_size, num_parallel_calls)
-
-    def has_txt(self):
-        p = Path(self.dataset_dir) / (self.train_or_val+f'_{self.strides}.txt')
-        self.samples = []
-        with open(p, 'r') as f:
-            for i in f.readlines():
-                self.samples.append(i.replace('clean', 'final').strip().split(','))
+        p_class = p / 'meta/classes.txt'
+        with open(p_class, 'r') as f:
+            self.classes = f.read().split('\n')[:-1]
+        self.num_classes = len(self.classes)
+            

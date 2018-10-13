@@ -31,3 +31,9 @@ def window(seq, n = 2):
     for el in it:
         result = result[1:] + (el,)
         yield result
+
+def to_rgb(image):
+    if image.ndim == 2:
+        return np.stack([image]*3, axis = -1)
+    else:
+        return image
