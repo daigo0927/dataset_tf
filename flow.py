@@ -29,15 +29,19 @@ def load_flow(uri):
 
 
 class BaseDataset(metaclass = ABCMeta):
-    """ Wrapper class to flexibly utilize tf.data pipeline """
+    """ Abstract class to flexibly utilize tf.data pipeline """
     def __init__(self, dataset_dir, train_or_val,
                  crop_type = 'random', crop_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
         """ 
         Args:
-        - str dataset_dir: target dataset directory
-        - str train_or_val: flag indicates train or validation
-        - str crop_type: 
+        - dataset_dir str: target dataset directory
+        - train_or_val str: flag indicates train or validation
+        - crop_type str: crop type, 'random', 'center', or None
+        - crop_shape tuple<int>: crop shape
+        - shuffle bool: if shuffle or not
+        - batch_size int: batch size
+        - num_parallel_calls int: # of parallel calls
         """
         self.dataset_dir = dataset_dir
         if not train_or_val in ['train', 'val']:
@@ -145,6 +149,7 @@ class BaseDataset(metaclass = ABCMeta):
 
 
 class FlyingChairs(BaseDataset):
+    """ FlyingChairs dataset pipeline """
     def __init__(self, dataset_dir, train_or_val,
                  crop_type = 'random', crop_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
@@ -158,8 +163,20 @@ class FlyingChairs(BaseDataset):
                    for i in zip(imgs[::2], imgs[1::2])]
         self.split(samples)
 
+class FlyingThings3D(BaseDataset):
+    def __init__(self, dataset_dir, train_or_val,
+                 crop_type = 'random', crop_shape = None,
+                 shuffle = False, batch_size = 1, num_parallel_calls = 0):
+        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape,
+                         shuffle, batch_size, num_parallel_calls)
+
+    def has_no_txt(self):
+        # TODO
+        pass
+
 
 class Sintel(BaseDataset):
+    """ MPI-Sintel-complete dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, mode = 'clean',
                  crop_type = 'random', crop_shape = None,
                  shuffle = False, batch_size = 1, num_parallel_calls = 0):
@@ -173,22 +190,44 @@ class Sintel(BaseDataset):
         p_flow = p / 'training/flow'
         
         collections_of_scenes = sorted(map(str, p_img.glob('**/*.png')))
-        collections = [list(g) for k, g in groupby(collections_of_scenes, lambda x: x.split('/'[-2]))]
+        collections = [list(g) for k, g in groupby(collections_of_scenes, lambda x: x.split('/')[-2])]
         samples = [(*i, i[0].replace(self.mode, 'flow').replace('.png', '.flo'))\
                     for collection in collections for i in utils.window(collection, 2)]
         self.split(samples)
 
 
 class SintelClean(Sintel):
+    """ MPI-Sintel-complete dataset (clean path) pipeline """
     def __init__(self, dataset_dir, train_or_val, crop_type, crop_shape,
                  shuffle, batch_size, num_parallel_calls):
         super().__init__(dataset_dir, train_or_val, 'clean', crop_type, crop_shape,
                          shuffle, batch_size, num_parallel_calls)
 
+    def has_txt(self):
+        p = Path(self.dataset_dir) / (self.train_or_val+'.txt')
+        self.samples = []
+        with open(p, 'r') as f:
+            for i in f.readlines():
+                img_0_path, img_1_path, flow_path = i.split(',')
+                img_0_path, img_1_path = map(lambda p: p.replace('final', 'clean'),
+                                             (img_0_path, img_1_path))
+                flow_path = flow_path.strip()
+                self.samples.append((img_0_path, img_1_path, flow_path))
+
 class SintelFinal(Sintel):
+    """ MPI-Sintel-complete dataset (final path) pipeline """
     def __init__(self, dataset_dir, train_or_val, crop_type, crop_shape,
                  shuffle, batch_size, num_parallel_calls):
         super().__init__(dataset_dir, train_or_val, 'final', crop_type, crop_shape,
                          shuffle, batch_size, num_parallel_calls)
 
-
+    def has_txt(self):
+        p = Path(self.dataset_dir) / (self.train_or_val+'.txt')
+        self.samples = []
+        with open(p, 'r') as f:
+            for i in f.readlines():
+                img_0_path, img_1_path, flow_path = i.split(',')
+                img_0_path, img_1_path = map(lambda p: p.replace('clean', 'final'),
+                                             (img_0_path, img_1_path))
+                flow_path = flow_path.strip()
+                self.samples.append((img_0_path, img_1_path, flow_path))

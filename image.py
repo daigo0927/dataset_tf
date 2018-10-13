@@ -15,18 +15,19 @@ import utils
 class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 strides = 3, stretchable = False,
-                 crop_type = 'random', crop_shape = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
+                 use_label = True, one_hot = True,
                  shuffle = False, batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
-        - strides int: target temporal range of triplet images
-        - stretchable bool: enabling shift of start and end index of triplet images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape
-        - shuffle bool: if shuffle
+        - resize_shape tuple<int>: resize shape
+        - use_label bool: if use label or not
+        - one_hot bool: if encode label one-hot or not
+        - shuffle bool: if shuffle or not
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
@@ -35,11 +36,13 @@ class BaseDataset(metaclass = ABCMeta):
             raise ValueError('train_or_val is either train or val')
         self.train_or_val = train_or_val
 
-        self.strides = strides
-        self.stretchable = stretchable
-
         self.crop_type = crop_type
         self.crop_shape = crop_shape
+
+        self.resize_shape = resize_shape
+
+        self.use_label = use_label
+        self.one_hot = one_hot
 
         self.shuffle = shuffle
         self.batch_size = batch_size
@@ -51,11 +54,13 @@ class BaseDataset(metaclass = ABCMeta):
         self._build()
 
     def has_txt(self):
-        p = Path(self.dataset_dir) / (self.train_or_val + f'_{self.strides}frames.txt')
+        p = Path(self.dataset_dir) / (self.train_or_val + '.txt')
         self.samples = []
         with open(p, 'r') as f:
             for i in f.readlines():
-                self.samples.append(i.strip().split(','))
+                img_path, label = i.split(',')
+                label = int(label.strip())
+                self.samples.append(img_path, label)
 
     @abstractmethod
     def has_no_txt(self):
@@ -74,42 +79,43 @@ class BaseDataset(metaclass = ABCMeta):
 
         self.samples = train_samples if self.train_or_val == 'train' else val_samples
 
-    def parse(self, filenames):
+    def parse(self, img_path, label):
         """
-        Tensorflow file parser using native python function
-        Args: tf.Tensor<tf.string> filenames: indicates target images and flow files
+        Tensorflow file parser 
+        Args:
+        - img_path tf.string: image path
+        - label tf.uint8: label
         Returns:
         - tf.Tensor<tf.uint8> image_0, image_1: target 0,1-th image
-        - tf.Tensor<tf.float32> flow: target optical flow
+        - tf.Tensor<tf.uint8> flow: target optical flow
         """
-        return tf.py_func(self._read_py, [filenames], [tf.uint8, tf.uint8, tf.uint8, tf.float32])
+        image = tf.py_func(lambda p: imread(p.decode()), [img_path], tf.uint8)
+        return image, label
 
     def _read_py(self, filenames):
         """ Native python function for read image and flow data """
-        if self.stretchable:
-            f, f_end = sorted(np.random.choice(range(1, self.strides), 2, replace = False))
-        else:
-            f_end = self.strides-1
-            f = np.random.randint(1, f_end)
+        raise NotImplementedError('Native python function to read images is not implemented')
 
-        t = np.array(f/f_end, dtype = np.float32)
-        
-        image_0_path, image_t_path, image_1_path = filenames[0], filenames[f], filenames[f_end]
-        image_0, image_t, image_1 = map(lambda x: imread(x.decode()),
-                                        [image_0_path, image_t_path, image_1_path])
-        return image_0, image_t, image_1, t
-
-    def preprocess(self, image_0, image_t, image_1, t):
+    def preprocess(self, image, label):
         """ Function to preprocess raw images and optical flow """
+        # TODO: force gray-scale image to rgb image
+        
         if self.crop_shape is not None:
-            image_0, image_t, image_1 = tf.py_func(self._crop_py, [image_0, image_t, image_1],
-                                                   [tf.uint8, tf.uint8, tf.uint8])
+            image = tf.py_func(self._crop_py, [image], tf.uint8)
 
-        images = tf.stack([image_0, image_t, image_1], axis = 0)
-        images = tf.cast(images, tf.float32)
-        images = images/255.
+        if self.resize_shape is not None:
+            image = tf.image.resize_images(image, self.resize_shape)
 
-        return images, t
+        if self.one_hot:
+            label = tf.one_hot(label, self.num_classes)
+
+        image = tf.cast(image, tf.float32)
+        image = image/255.
+
+        if self.use_label:
+            return image, label
+        else:
+            return image
 
     def _crop_py(self, image_0, image_t, image_1):
         """ Native python function for cropping """
@@ -122,6 +128,10 @@ class BaseDataset(metaclass = ABCMeta):
             raise ValueError('invalid cropping argument has found')
         image_0, image_t, image_1 = map(cropper, [image_0, image_t, image_1])
         return image_0, image_t, image_1
+
+    @abstractmethod
+    def get_classes(self):
+        pass # TODO
             
     def _build(self):
         self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
