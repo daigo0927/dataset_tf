@@ -157,15 +157,16 @@ class BaseDataset(metaclass = ABCMeta):
         return image_0, image_1, flow
             
     def _build(self):
-        self._dataset = (tf.data.Dataset.from_tensor_slices(self.samples)
-                         .map(self.parse, self.num_parallel_calls)
-                         .map(self.preprocess, self.num_parallel_calls))
-        
+        self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
+
         if self.train_or_val == 'train':
             self._dataset = self._dataset.shuffle(len(self.samples)).repeat()
 
-        self._dataset = self._dataset.batch(self.batch_size).prefetch(self.batch_size)
-        return
+        self._dataset = (self._dataset.map(self.parse, self.num_parallel_calls)
+                         .map(self.preprocess, self.num_parallel_calls)
+                         .batch(self.batch_size)
+                         .prefetch(1))
+        return 
 
     def make_one_shot_iterator(self):
         return self._dataset.make_one_shot_iterator()
