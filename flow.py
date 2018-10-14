@@ -162,16 +162,18 @@ class BaseDataset(metaclass = ABCMeta):
                          .map(self.preprocess, self.num_parallel_calls))
         
         if self.train_or_val == 'train':
-            self._dataset = self._dataset.shuffle(len(self.samples).repeat())
+            self._dataset = self._dataset.shuffle(len(self.samples)).repeat()
 
-        self._dataset = self._dataset.batch(batch_size)
+        self._dataset = self._dataset.batch(self.batch_size).prefetch(self.batch_size)
         return
 
     def make_one_shot_iterator(self):
         return self._dataset.make_one_shot_iterator()
 
     def make_initializable_iterator(self):
-        return self._dataset.make_initializable_iterator()
+        iterator = self._dataset.make_initializable_iterator()
+        initializer = iterator.initializer
+        return iterator, initializer
 
 
 class FlyingChairs(BaseDataset):
