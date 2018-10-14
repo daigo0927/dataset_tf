@@ -257,3 +257,20 @@ class SintelFinal(Sintel):
                                              (img_0_path, img_1_path))
                 flow_path = flow_path.strip()
                 self.samples.append((img_0_path, img_1_path, flow_path))
+
+
+def get_dataset(dataset_name):
+    """
+    Get specified dataset 
+    Args: dataset_name str: target dataset name
+    Returns: dataset tf.data.Dataset: target dataset class
+
+    Available dataset pipelines
+    - FlyingChairs
+    - Sintel, SintelClean, SintelFinal
+    """
+    datasets = {"FlyingChairs":FlyingChairs,
+                "Sintel":Sintel,
+                "SintelClean":SintelClean,
+                "SintelFinal":SintelFinal}
+    return datasets[dataset_name]

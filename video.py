@@ -273,3 +273,20 @@ class SintelFinal(Sintel):
         with open(p, 'r') as f:
             for i in f.readlines():
                 self.samples.append(i.replace('clean', 'final').strip().split(','))
+
+                
+def get_dataset(dataset_name):
+    """
+    Get specified dataset 
+    Args: dataset_name str: target dataset name
+    Returns: dataset tf.data.Dataset: target dataset class
+
+    Available dataset pipelines
+    - DAVIS
+    - Sintel, SintelClean, SintelFinal
+    """
+    datasets = {"DAVIS":DAVIS,
+                "Sintel":Sintel,
+                "SintelClean":SintelClean,
+                "SintelFinal":SintelFinal}
+    return datasets[dataset_name]

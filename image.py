@@ -207,3 +207,15 @@ class Food101(BaseDataset):
             self.classes = f.read().split('\n')[:-1]
         self.num_classes = len(self.classes)
             
+
+def get_dataset(dataset_name):
+    """
+    Get specified dataset 
+    Args: dataset_name str: target dataset name
+    Returns: dataset tf.data.Dataset: target dataset class
+
+    Available dataset pipelines
+    - Food101
+    """
+    datasets = {"Food101":Food101}
+    return datasets[dataset_name]
