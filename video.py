@@ -14,19 +14,19 @@ from . import utils
 class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 strides = 3, stretchable = False,
+                 strides = 3, stretchable = False, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
         - strides int: target temporal range of triplet images
         - stretchable bool: enabling shift of start and end index of triplet images
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape
         - resize_shape tuple<int>: resize shape
-        - shuffle bool: if shuffle
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
@@ -38,11 +38,11 @@ class BaseDataset(metaclass = ABCMeta):
         self.strides = strides
         self.stretchable = stretchable
 
+        self.image_size = utils.get_size(origin_size, crop_shape, resize_shape)
         self.crop_type = crop_type
         self.crop_shape = crop_shape
         self.resize_shape = resize_shape
 
-        self.shuffle = shuffle
         self.batch_size = batch_size
         self.num_parallel_calls = num_parallel_calls
 
@@ -113,6 +113,7 @@ class BaseDataset(metaclass = ABCMeta):
         images = tf.stack([image_0, image_t, image_1], axis = 0)
         images = tf.cast(images, tf.float32)
         images = images/255.
+        images.set_shape((3, *self.image_size, 3))
 
         return images, t
 
@@ -135,27 +136,30 @@ class BaseDataset(metaclass = ABCMeta):
         return image_0, image_t, image_1
             
     def _build(self):
-        self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
-        if self.shuffle:
-            self._dataset = self._dataset.shuffle(len(self.samples))
+        self._dataset = (tf.data.Dataset.from_tensor_slices(self.samples)
+                         .map(self.parse, self.num_parallel_calls)
+                         .map(self.preprocess, self.num_parallel_calls))
+        
+        if self.train_or_val == 'train':
+            self._dataset = self._dataset.shuffle(len(self.samples)).repeat()
 
-        self._dataset = (self._dataset.map(self.parse, self.num_parallel_calls)
-                        .map(self.preprocess, self.num_parallel_calls)
-                        .batch(self.batch_size)
-                        .repeat()
-                        .prefetch(1))
+        self._dataset = self._dataset.batch(self.batch_size)
         return
 
     def make_one_shot_iterator(self):
         return self._dataset.make_one_shot_iterator()
 
+    def make_initializable_iterator():
+        return self._dataset.make_initializable_iterator()
+    
+
 
 class DAVIS(BaseDataset):
     """ DAVIS dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, resolution = '480p',
-                 strides = 3, stretchable = False,
+                 strides = 3, stretchable = False, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
@@ -163,10 +167,10 @@ class DAVIS(BaseDataset):
         - resolution str: either 480p or Full-Resolution for target resolution
         - strides int: target temporal range of triplet images
         - stretchable bool: enabling shift of start and end index of triplet images
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape of target images
         - resize_shape tuple<int>: resize shape
-        - shuffle bool: if shuffle samples
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
@@ -174,8 +178,8 @@ class DAVIS(BaseDataset):
             raise ValueError('Invalid argument for target resolution')
         self.resolution = resolution
         super().__init__(dataset_dir, train_or_val, strides, stretchable,
-                         crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         origin_size, crop_type, crop_shape, resize_shape,
+                         batch_size, num_parallel_calls)
 
     def has_txt(self):
         p = Path(self.dataset_dir) / (self.train_or_val + f'_{self.strides}frames.txt')
@@ -204,9 +208,9 @@ class DAVIS(BaseDataset):
 class Sintel(BaseDataset):
     """ MPI-Sintel-complete dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, mode = 'clean',
-                 strides = 3, stretchable = False,
+                 strides = 3, stretchable = False, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
@@ -214,17 +218,17 @@ class Sintel(BaseDataset):
         - mode str: either clean or final to specify data path
         - strides int: target temporal range of triplet images
         - stretchable bool: enabling shift of start and end index of triplet images
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape of target images
         - resize_shape tuple<int>: resize shape
-        - shuffle bool: if shuffle samples
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
         self.mode = mode
         super().__init__(dataset_dir, train_or_val, strides, stretchable,
-                         crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         origin_size, crop_type, crop_shape, resize_shape,
+                         batch_size, num_parallel_calls)
 
     def has_no_txt(self):
         p = Path(self.dataset_dir)
@@ -241,13 +245,13 @@ class Sintel(BaseDataset):
 class SintelClean(Sintel):
     """ MPI-Sintel-complete dataset (clean path) pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 strides, stretchable,
+                 strides, stretchable, origin_size,
                  crop_type, crop_shape, resize_shape,
-                 shuffle, batch_size, num_parallel_calls):
+                 batch_size, num_parallel_calls):
         super().__init__(dataset_dir, train_or_val, 'clean',
-                         strides, stretchable,
+                         strides, stretchable, origin_size,
                          crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         batch_size, num_parallel_calls)
 
     def has_txt(self):
         p = Path(self.dataset_dir) / (self.train_or_val+f'_{self.strides}.txt')
@@ -259,13 +263,13 @@ class SintelClean(Sintel):
 class SintelFinal(Sintel):
     """ MPI-Sintel-complete dataset (final path) pipeline """
     def __init__(self, dataset_dir, train_or_val,
-                 strides, stretchable,
+                 strides, stretchable, origin_size,
                  crop_type, crop_shape, resize_shape,
-                 shuffle, batch_size, num_parallel_calls):
+                 batch_size, num_parallel_calls):
         super().__init__(dataset_dir, train_or_val, 'final',
-                         strides, stretchable,
+                         strides, stretchable, origin_size,
                          crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         batch_size, num_parallel_calls)
 
     def has_txt(self):
         p = Path(self.dataset_dir) / (self.train_or_val+f'_{self.strides}.txt')

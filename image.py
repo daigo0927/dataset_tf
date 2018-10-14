@@ -14,20 +14,20 @@ from . import utils
 
 class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
                  use_label = True, one_hot = True,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape
         - resize_shape tuple<int>: resize shape
         - use_label bool: if use label or not
         - one_hot bool: if encode label one-hot or not
-        - shuffle bool: if shuffle or not
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
@@ -36,15 +36,14 @@ class BaseDataset(metaclass = ABCMeta):
             raise ValueError('train_or_val is either train or val')
         self.train_or_val = train_or_val
 
+        self.image_size = utils.get_size(origin_size, crop_shape, resize_shape)
         self.crop_type = crop_type
         self.crop_shape = crop_shape
-
         self.resize_shape = resize_shape
 
         self.use_label = use_label
         self.one_hot = one_hot
 
-        self.shuffle = shuffle
         self.batch_size = batch_size
         self.num_parallel_calls = num_parallel_calls
 
@@ -53,7 +52,6 @@ class BaseDataset(metaclass = ABCMeta):
         if p.exists(): self.has_txt()
         else: self.has_no_txt()
 
-        warnings.filterwarnings('ignore', category = UserWarning)
         self._build()
 
     def has_txt(self):
@@ -124,6 +122,7 @@ class BaseDataset(metaclass = ABCMeta):
 
         image = tf.cast(image, tf.float32)
         image = image/255.
+        image.set_shape((*self.image_size, 3))
 
         if self.use_label:
             return image, label
@@ -147,15 +146,14 @@ class BaseDataset(metaclass = ABCMeta):
         pass 
             
     def _build(self):
-        self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
-        if self.shuffle:
-            self._dataset = self._dataset.shuffle(len(self.samples))
+        self._dataset = (tf.data.Dataset.from_tensor_slices(self.samples)
+                         .map(self.parse, self.num_parallel_calls)
+                         .map(self.preprocess, self.num_parallel_calls))
+        
+        if self.train_or_val == 'train'
+            self._dataset = self._dataset.shuffle(len(self.samples)).repeat()
 
-        self._dataset = (self._dataset.map(self.parse, self.num_parallel_calls)
-                        .map(self.preprocess, self.num_parallel_calls)
-                        .batch(self.batch_size)
-                        .repeat()
-                        .prefetch(1))
+        self._dataset = self._dataset.batch(self.batch_size)
         return
 
     def make_one_shot_iterator(self):
@@ -164,14 +162,15 @@ class BaseDataset(metaclass = ABCMeta):
 
 class Food101(BaseDataset):
     """ Food-101 dataset pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
                  use_label = True, one_hot = True,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 1):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type either of [random, center, None]
         - crop_shape tuple<int>: crop shape
         - resize_shape tuple<int>: resize shape
@@ -181,8 +180,10 @@ class Food101(BaseDataset):
         - batch_size int: batch size
         - num_parallel_calls int: number of parallel process
         """
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
-                         use_label, one_hot, shuffle, batch_size, num_parallel_calls)
+        super().__init__(dataset_dir, train_or_val, origin_size
+                         crop_type, crop_shape, resize_shape,
+                         use_label, one_hot, batch_size, num_parallel_calls)
+        warnings.filterwarnings('ignore', category = UserWarning)
 
     def has_no_txt(self):
         p = Path(self.dataset_dir)

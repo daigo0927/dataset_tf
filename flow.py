@@ -39,17 +39,17 @@ def resize_flow(flow, resize_shape):
 
 class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 0):
+                 batch_size = 1, num_parallel_calls = 0):
         """ 
         Args:
         - dataset_dir str: target dataset directory
         - train_or_val str: flag indicates train or validation
+        - origin_size tuple<int>: original size of target images
         - crop_type str: crop type, 'random', 'center', or None
         - crop_shape tuple<int>: crop shape
         - resize_shape tuple<int>: resize shape
-        - shuffle bool: if shuffle or not
         - batch_size int: batch size
         - num_parallel_calls int: # of parallel calls
         """
@@ -58,11 +58,11 @@ class BaseDataset(metaclass = ABCMeta):
             raise ValueError('train_or_val is either train or val')
         self.train_or_val = train_or_val
 
+        self.image_size = utils.get_size(origin_size, crop_shape, resize_shape)
         self.crop_type = crop_type
         self.crop_shape = crop_shape
         self.resize_shape = resize_shape
 
-        self.shuffle = shuffle
         self.batch_size = batch_size
         self.num_parallel_calls = num_parallel_calls
 
@@ -132,6 +132,9 @@ class BaseDataset(metaclass = ABCMeta):
         images = tf.cast(images, tf.float32)
         images = images/255.
 
+        images.set_shape((2, *self.image_size, 3))
+        flow.set_shape((*self.image_size, 2))
+
         return images, flow
 
     def _crop_py(self, image_0, image_1, flow):
@@ -154,28 +157,31 @@ class BaseDataset(metaclass = ABCMeta):
         return image_0, image_1, flow
             
     def _build(self):
-        self._dataset = tf.data.Dataset.from_tensor_slices(self.samples)
-        if self.shuffle:
-            self._dataset = self._dataset.shuffle(len(self.samples))
+        self._dataset = (tf.data.Dataset.from_tensor_slices(self.samples)
+                         .map(self.parse, self.num_parallel_calls)
+                         .map(self.preprocess, self.num_parallel_calls))
+        
+        if self.train_or_val == 'train':
+            self._dataset = self._dataset.shuffle(len(self.samples).repeat())
 
-        self._dataset = (self._dataset.map(self.parse, self.num_parallel_calls)
-                        .map(self.preprocess, self.num_parallel_calls)
-                        .batch(self.batch_size)
-                        .repeat()
-                        .prefetch(1))
+        self._dataset = self._dataset.batch(batch_size)
         return
 
     def make_one_shot_iterator(self):
         return self._dataset.make_one_shot_iterator()
 
+    def make_initializable_iterator(self):
+        return self._dataset.make_initializable_iterator()
+
 
 class FlyingChairs(BaseDataset):
     """ FlyingChairs dataset pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 0):
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                 batch_size = 1, num_parallel_calls = 0):
+        super().__init__(dataset_dir, train_or_val, origin_size,
+                         crop_type, crop_shape, resize_shape,
+                         batch_size, num_parallel_calls)
 
     def has_no_txt(self):
         p = Path(self.dataset_dir) / 'data'
@@ -185,11 +191,12 @@ class FlyingChairs(BaseDataset):
         self.split(samples)
 
 class FlyingThings3D(BaseDataset):
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 0):
-        super().__init__(dataset_dir, train_or_val, crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                 batch_size = 1, num_parallel_calls = 1):
+        super().__init__(dataset_dir, train_or_val, origin_size,
+                         crop_type, crop_shape, resize_shape,
+                         batch_size, num_parallel_calls)
 
     def has_no_txt(self):
         # TODO
@@ -198,13 +205,13 @@ class FlyingThings3D(BaseDataset):
 
 class Sintel(BaseDataset):
     """ MPI-Sintel-complete dataset pipeline """
-    def __init__(self, dataset_dir, train_or_val, mode = 'clean',
+    def __init__(self, dataset_dir, train_or_val, mode = 'clean', origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 shuffle = False, batch_size = 1, num_parallel_calls = 0):
+                 batch_size = 1, num_parallel_calls = 0):
         self.mode = mode
-        super().__init__(dataset_dir, train_or_val,
+        super().__init__(dataset_dir, train_or_val, origin_size,
                          crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         batch_size, num_parallel_calls)
 
     def has_no_txt(self):
         p = Path(self.dataset_dir)
@@ -220,12 +227,12 @@ class Sintel(BaseDataset):
 
 class SintelClean(Sintel):
     """ MPI-Sintel-complete dataset (clean path) pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size,
                  crop_type, crop_shape, resize_shape,
-                 shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'clean',
+                 batch_size, num_parallel_calls):
+        super().__init__(dataset_dir, train_or_val, 'clean', origin_size,
                          crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         batch_size, num_parallel_calls)
 
     def has_txt(self):
         p = Path(self.dataset_dir) / (self.train_or_val+'.txt')
@@ -240,12 +247,12 @@ class SintelClean(Sintel):
 
 class SintelFinal(Sintel):
     """ MPI-Sintel-complete dataset (final path) pipeline """
-    def __init__(self, dataset_dir, train_or_val,
+    def __init__(self, dataset_dir, train_or_val, origin_size,
                  crop_type, crop_shape, resize_shape,
-                 shuffle, batch_size, num_parallel_calls):
-        super().__init__(dataset_dir, train_or_val, 'final',
+                 batch_size, num_parallel_calls):
+        super().__init__(dataset_dir, train_or_val, 'final', origin_size,
                          crop_type, crop_shape, resize_shape,
-                         shuffle, batch_size, num_parallel_calls)
+                         batch_size, num_parallel_calls)
 
     def has_txt(self):
         p = Path(self.dataset_dir) / (self.train_or_val+'.txt')

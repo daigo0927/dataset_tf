@@ -14,7 +14,7 @@ class RandomCropper(object):
  
 
 class CenterCropper(object):
-    def __init__(self, image_sample, crop_size):
+    def __init__(self, image_size, crop_size):
         self.h, self.w = image_size
         self.th, self.tw = crop_size
 
@@ -37,3 +37,16 @@ def to_rgb(image):
         return np.stack([image]*3, axis = -1)
     else:
         return image
+
+def get_size(origin_size = None, crop_size = None, resize_size = None):
+    """ Get the resulting image size after cropping and resizing """
+    if resize_size is not None:
+        image_size = resize_size
+    elif crop_size is not None:
+        image_size = crop_size
+    elif origin_size
+        image_size = origin_size
+    else:
+        raise ValueError('One of the argument should be not None')
+
+    return image_size
