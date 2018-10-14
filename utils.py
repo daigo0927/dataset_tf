@@ -44,7 +44,7 @@ def get_size(origin_size = None, crop_size = None, resize_size = None):
         image_size = resize_size
     elif crop_size is not None:
         image_size = crop_size
-    elif origin_size
+    elif origin_size:
         image_size = origin_size
     else:
         raise ValueError('One of the argument should be not None')

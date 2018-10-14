@@ -41,7 +41,7 @@ class BaseDataset(metaclass = ABCMeta):
     """ Abstract class to flexibly utilize tf.data pipeline """
     def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 batch_size = 1, num_parallel_calls = 0):
+                 batch_size = 1, num_parallel_calls = 1):
         """ 
         Args:
         - dataset_dir str: target dataset directory
@@ -178,7 +178,7 @@ class FlyingChairs(BaseDataset):
     """ FlyingChairs dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 batch_size = 1, num_parallel_calls = 0):
+                 batch_size = 1, num_parallel_calls = 1):
         super().__init__(dataset_dir, train_or_val, origin_size,
                          crop_type, crop_shape, resize_shape,
                          batch_size, num_parallel_calls)
@@ -207,7 +207,7 @@ class Sintel(BaseDataset):
     """ MPI-Sintel-complete dataset pipeline """
     def __init__(self, dataset_dir, train_or_val, mode = 'clean', origin_size = None,
                  crop_type = 'random', crop_shape = None, resize_shape = None,
-                 batch_size = 1, num_parallel_calls = 0):
+                 batch_size = 1, num_parallel_calls = 1):
         self.mode = mode
         super().__init__(dataset_dir, train_or_val, origin_size,
                          crop_type, crop_shape, resize_shape,
@@ -227,9 +227,9 @@ class Sintel(BaseDataset):
 
 class SintelClean(Sintel):
     """ MPI-Sintel-complete dataset (clean path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, origin_size,
-                 crop_type, crop_shape, resize_shape,
-                 batch_size, num_parallel_calls):
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
+                 batch_size = 1, num_parallel_calls = 1):
         super().__init__(dataset_dir, train_or_val, 'clean', origin_size,
                          crop_type, crop_shape, resize_shape,
                          batch_size, num_parallel_calls)
@@ -247,9 +247,9 @@ class SintelClean(Sintel):
 
 class SintelFinal(Sintel):
     """ MPI-Sintel-complete dataset (final path) pipeline """
-    def __init__(self, dataset_dir, train_or_val, origin_size,
-                 crop_type, crop_shape, resize_shape,
-                 batch_size, num_parallel_calls):
+    def __init__(self, dataset_dir, train_or_val, origin_size = None,
+                 crop_type = 'random', crop_shape = None, resize_shape = None,
+                 batch_size = 1, num_parallel_calls = 1):
         super().__init__(dataset_dir, train_or_val, 'final', origin_size,
                          crop_type, crop_shape, resize_shape,
                          batch_size, num_parallel_calls)
