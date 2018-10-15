@@ -75,8 +75,8 @@ class BaseDataset(metaclass = ABCMeta):
         train_samples = samples[:idx]
         val_samples = samples[idx:]
 
-        with open(p / f'train_{self.strides}frames.txt', 'w') as f: f.writelines((','.join(i) + '\n' for i in train_samples))
-        with open(p / f'val_{self.strides}frames.txt', 'w') as f: f.writelines((','.join(i) + '\n' for i in val_samples))
+        with open(p / 'train.txt', 'w') as f: f.writelines((','.join(i) + '\n' for i in train_samples))
+        with open(p / 'val.txt', 'w') as f: f.writelines((','.join(i) + '\n' for i in val_samples))
 
         self.samples = train_samples if self.train_or_val == 'train' else val_samples
 
@@ -122,12 +122,8 @@ class BaseDataset(metaclass = ABCMeta):
 
         image = tf.cast(image, tf.float32)
         image = image/255.
-        image.set_shape((*self.image_size, 3))
 
-        if self.use_label:
-            return image, label
-        else:
-            return image
+        return images, labels
 
     def _crop_py(self, image):
         """ Native python function for cropping """
@@ -157,13 +153,31 @@ class BaseDataset(metaclass = ABCMeta):
                          .prefetch(1))
         return
 
-    def make_one_shot_iterator(self):
-        return self._dataset.make_one_shot_iterator()
-
-    def make_initializable_iterator(self):
-        iterator = self._dataset.make_initializable_iterator()
-        initializer = iterator.initializer
-        return iterator, initializer
+    def get_element(self)
+        """ Get data samples
+        Returns:
+        - images: tf.Tensor: minibatch of images
+        - (if required) labels: tf.Tensor: minibatch of labels
+        
+        if self.train_or_val == 'val' (i.e., validation mode), additionally returns
+        - initializer: tf.data.Iterator.initializer: iterator initializer
+        """
+        if self.train_or_val == 'train':
+            iterator = self._dataset.make_one_shot_iterator
+            images, labels = iterator.get_next()
+            images.set_shape((self.batch_size, *self.image_size, 3))
+            if self.use_label:
+                return images, labels
+            else:
+                return images
+        else:
+            iterator = self._dataset.make_initializable_iterator()
+            images, labels = iterator.get_next()
+            images.set_shape((self.batch_size, *self.image_size, 3))
+            if self.use_label:
+                return images, labels, iterator.initializer
+            else:
+                return images, iterator.initializer
 
 
 class Food101(BaseDataset):

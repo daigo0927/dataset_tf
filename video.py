@@ -113,7 +113,6 @@ class BaseDataset(metaclass = ABCMeta):
         images = tf.stack([image_0, image_t, image_1], axis = 0)
         images = tf.cast(images, tf.float32)
         images = images/255.
-        images.set_shape((3, *self.image_size, 3))
 
         return images, t
 
@@ -147,13 +146,25 @@ class BaseDataset(metaclass = ABCMeta):
                          .prefetch(1))
         return
 
-    def make_one_shot_iterator(self):
-        return self._dataset.make_one_shot_iterator()
-
-    def make_initializable_iterator():
-        iterator = self._dataset.make_initializable_iterator()
-        initializer = iterator.initializer
-        return iterator, initializer
+    def get_element(self)
+        """ Get data samples
+        Returns:
+        - images: tf.Tensor: minibatch of pairwise images
+        - t: tf.Tensor: positions of middle frame between start and end frames
+        
+        if self.train_or_val == 'val' (i.e., validation mode), additionally returns
+        - initializer: tf.data.Iterator.initializer: iterator initializer
+        """
+        if self.train_or_val == 'train':
+            iterator = self._dataset.make_one_shot_iterator
+            images, t = iterator.get_next()
+            images.set_shape((self.batch_size, 3, *self.image_size, 3))
+            return images, t
+        else:
+            iterator = self._dataset.make_initializable_iterator()
+            images, t = iterator.get_next()
+            images.set_shape((self.batch_size, 3, *self.image_size, 3))
+            return images, t, iterator.initializer
     
 
 
