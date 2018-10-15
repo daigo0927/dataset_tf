@@ -163,7 +163,7 @@ class BaseDataset(metaclass = ABCMeta):
         - initializer: tf.data.Iterator.initializer: iterator initializer
         """
         if self.train_or_val == 'train':
-            iterator = self._dataset.make_one_shot_iterator
+            iterator = self._dataset.make_one_shot_iterator()
             images, labels = iterator.get_next()
             images.set_shape((self.batch_size, *self.image_size, 3))
             if self.use_label:
