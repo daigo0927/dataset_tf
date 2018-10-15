@@ -146,7 +146,7 @@ class BaseDataset(metaclass = ABCMeta):
                          .prefetch(1))
         return
 
-    def get_element(self)
+    def get_element(self):
         """ Get data samples
         Returns:
         - images: tf.Tensor: minibatch of pairwise images
