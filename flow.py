@@ -130,7 +130,6 @@ class BaseDataset(metaclass = ABCMeta):
 
         images = tf.stack([image_0, image_1], axis = 0)
         images = tf.cast(images, tf.float32)
-        images = images/255.
 
         return images, flow
 

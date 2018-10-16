@@ -48,7 +48,7 @@ class BaseDataset(metaclass = ABCMeta):
         self.num_parallel_calls = num_parallel_calls
 
         self.get_classes()
-        p = Path(dataset_dir) / (train_or_val+'_{self.strides}frames.txt')
+        p = Path(dataset_dir) / (train_or_val+'.txt')
         if p.exists(): self.has_txt()
         else: self.has_no_txt()
 
@@ -121,7 +121,6 @@ class BaseDataset(metaclass = ABCMeta):
             label = tf.one_hot(label, self.num_classes)
 
         image = tf.cast(image, tf.float32)
-        image = image/255.
 
         return images, labels
 
@@ -207,7 +206,8 @@ class Food101(BaseDataset):
 
     def has_no_txt(self):
         p = Path(self.dataset_dir)
-        p_set = p / 'meta' / (self.train_or_val+'.txt')
+        train_or_test = 'train' if self.train_or_val == 'train' else 'test'
+        p_set = p / 'meta' / (train_or_test+'.txt')
         p_img = p / 'images'
         self.samples = []
 
